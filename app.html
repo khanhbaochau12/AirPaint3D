@@ -74,6 +74,28 @@
     .ctrl-btn:hover { background: rgba(99, 179, 237, 0.28); }
     .ctrl-btn:disabled { opacity: .4; cursor: default; }
 
+    .brush-types { display: flex; gap: 6px; }
+    .brush-types .ctrl-btn.active {
+      background: var(--accent); color: #0a0f1e; border-color: var(--accent);
+      font-weight: 600;
+    }
+
+    /* Highlight khi con trỏ tay đang trỏ vào — chụm để bấm */
+    .gesture-hover { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.85) !important; }
+
+    /* ── Con trỏ tay (theo ngón trỏ) ───────────── */
+    #hand-cursor {
+      position: fixed; top: -14px; left: -14px;
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 2px solid var(--accent);
+      box-shadow: 0 0 12px rgba(99, 179, 237, 0.7);
+      pointer-events: none; z-index: 60;
+    }
+    #hand-cursor.pinching {
+      background: rgba(99, 179, 237, 0.4);
+      border-color: #fff;
+    }
+
     #btn-ar { background: rgba(52, 211, 153, 0.15); border-color: rgba(52, 211, 153, 0.4); }
 
     /* ── Camera PiP ────────────────────────────── */
@@ -175,8 +197,13 @@
       <div class="color-swatch" data-color="#fb923c" style="background:#fb923c"></div>
       <div class="color-swatch" data-color="#f87171" style="background:#f87171"></div>
     </div>
+    <div class="brush-types">
+      <button class="ctrl-btn active" data-brush="normal">Bút thường</button>
+      <button class="ctrl-btn" data-brush="neon">Bút neon</button>
+      <button class="ctrl-btn" data-brush="glass">Bút trong mờ</button>
+    </div>
     <div class="brush-wrap">
-      <span>Brush</span>
+      <span>Cỡ bút</span>
       <input type="range" id="brush-size" min="2" max="50" value="15" />
     </div>
     <button class="ctrl-btn" id="btn-undo" title="Ctrl+Z">Hoàn tác</button>
@@ -196,7 +223,11 @@
     <div class="legend-row"><span class="icon">☝</span><b>Chỉ</b> — di chuyển</div>
     <div class="legend-row"><span class="icon">✊</span><b>Nắm</b> — kết thúc nét</div>
     <div class="legend-row"><span class="icon">🖐</span><b>Xòe</b> — xóa nét cuối</div>
+    <div class="legend-row"><span class="icon">☝</span><b>Trỏ nút</b> + 🤏 — bấm nút</div>
   </div>
+
+  <!-- Con trỏ tay -->
+  <div id="hand-cursor" class="hidden"></div>
 
   <!-- DOM overlay cho WebXR -->
   <div id="ar-overlay"></div>
@@ -225,6 +256,11 @@
           <span class="name">SPREAD</span> — xòe tay để xóa nét cuối
         </div>
       </div>
+
+      <p class="sub">
+        Toàn bộ nút công cụ, màu và loại bút đều bấm được bằng tay:
+        đưa ngón trỏ tới nút rồi chụm ngón cái + trỏ để chọn.
+      </p>
 
       <p class="camera-error hidden" id="camera-error">
         Không truy cập được camera. Hãy cấp quyền camera cho trang này

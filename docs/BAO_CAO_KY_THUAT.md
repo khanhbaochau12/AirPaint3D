@@ -174,6 +174,7 @@ Giữ nguyên geometry khi undo giúp redo tức thời (O(1), không rebuild).
 | 7 | SPREAD lặp mỗi frame xóa nhầm hàng loạt nét | Edge-trigger — chỉ xử lý tại frame chuyển trạng thái |
 | 8 | `requestSession('immersive-ar')` bị trình duyệt chặn khi gọi lúc khởi tạo | Chỉ gọi trong click handler của nút "Chế độ AR" (yêu cầu user gesture của WebXR spec) |
 | 9 | `requestAnimationFrame` không nhận XR frame trong AR session | Dùng `renderer.setAnimationLoop` cho toàn bộ vòng lặp render |
+| 10 | Cử chỉ PINCH vừa dùng để vẽ vừa dùng để bấm nút → xung đột | Phân xử theo vị trí con trỏ tay tại **thời điểm bắt đầu chụm**: trên nút UI thì bấm nút (kèm cooldown 600 ms chống double-click), ngoài canvas thì vẽ; pinch bắt đầu trên UI không bao giờ tạo nét cho tới khi thả tay |
 
 ---
 
@@ -188,7 +189,8 @@ dùng đúng 4 icon cử chỉ (🤏 ☝ ✊ 🖐), mọi nút chức năng dùn
 | Bảng chỉ dẫn cử chỉ | Góc dưới-trái, luôn hiển thị | Nhắc 4 cử chỉ trong lúc vẽ |
 | Camera PiP (mirror) | Góc dưới-phải | Người dùng canh vị trí tay trong khung hình |
 | HUD trạng thái | Góc trên-trái | Cử chỉ hiện tại, chế độ, số nét vẽ |
-| Toolbar | Giữa-dưới | Màu, cỡ brush, hoàn tác/làm lại, xóa, lưu PNG, xuất GLTF |
+| Toolbar | Giữa-dưới | Màu, loại bút (thường/neon/trong mờ), cỡ brush, hoàn tác/làm lại, xóa, lưu PNG, xuất GLTF |
+| Con trỏ tay | Theo ngón trỏ | Vòng tròn bám vị trí ngón trỏ; trỏ vào nút + chụm để bấm — mọi nút công cụ thao tác được bằng cử chỉ, không cần chuột |
 | Nút "Chế độ AR" | Góc trên-phải | Chỉ hiện trên thiết bị hỗ trợ immersive-ar |
 
 Xử lý lỗi thân thiện: camera bị từ chối → thông báo hướng dẫn cấp quyền và nút

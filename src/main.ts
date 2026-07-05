@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { GestureDetector, GestureEvent, GestureType } from './cv/GestureDetector';
-import { StrokeEngine } from './render/StrokeEngine';
+import { BrushType, StrokeEngine } from './render/StrokeEngine';
 import { PositionMapper } from './ar/PositionMapper';
 import { initXR, isARSupported } from './ar/XRSession';
 import { MultiplayerSync } from './net/MultiplayerSync';
@@ -21,6 +21,10 @@ const COLORS = {
 const STORAGE_KEY     = 'airpaint3d_scene_v1';
 const AUTOSAVE_DELAY  = 500;   // ms debounce
 const CURSOR_SYNC_FPS = 30;
+
+// Các element có thể bấm bằng cử chỉ tay (chỉ ngón trỏ + chụm)
+const UI_SELECTOR       = '.ctrl-btn, .color-swatch, [data-brush]';
+const UI_CLICK_COOLDOWN = 600;   // ms — chặn double-click do jitter
 
 const GESTURE_LABELS: Record<GestureType, string> = {
   PINCH:  '🤏 Đang vẽ',
@@ -53,9 +57,16 @@ class AirPaintApp {
   private isDrawing = false;
   private currentColor = COLORS.SKY;
   private brushRadius  = 0.015;
+  private currentBrush: BrushType = 'normal';
   private lastGesture: GestureType = 'NONE';
   private autosaveTimer?: number;
   private lastCursorSync = 0;
+
+  // Hand cursor — bấm nút UI bằng cử chỉ
+  private handCursorEl: HTMLElement | null = null;
+  private hoveredEl: Element | null = null;
+  private uiPinchActive = false;
+  private lastUiClick = 0;
 
   // Optional
   private multiplayer?: MultiplayerSync;
@@ -75,9 +86,15 @@ class AirPaintApp {
     this.setupMultiplayer();
     this.restoreFromStorage();
 
-    // Camera / mouse mode được chọn từ overlay onboarding —
+    // Camera được bật từ overlay onboarding —
     // getUserMedia + requestSession cần user gesture mới thân thiện.
     this.setupOnboarding();
+
+    // Hook kiểm thử: mô phỏng GestureEvent từ console khi có ?debug
+    if (new URLSearchParams(location.search).has('debug')) {
+      (window as unknown as Record<string, unknown>).__gesture =
+        (e: GestureEvent) => this.handleGesture(e);
+    }
 
     this.startRenderLoop();
   }
@@ -247,12 +264,14 @@ class AirPaintApp {
 
   private handleGesture(event: GestureEvent): void {
     this.updateGestureStatus(event.gesture);
+    const overUI = this.updateHandCursor(event);
 
     // Mất tracking — commit stroke dở dang, reset filter, ẩn cursor
     if (event.gesture === 'NONE') {
       this.stopDrawing();
       this.positionMapper.reset();
       if (this.cursorSphere) this.cursorSphere.visible = false;
+      this.uiPinchActive = false;
       this.lastGesture = 'NONE';
       return;
     }
@@ -266,16 +285,30 @@ class AirPaintApp {
     this.syncCursor(worldPos);
 
     switch (event.gesture) {
-      case 'PINCH':
-        // Đang vẽ
+      case 'PINCH': {
+        // Chụm trên nút UI = bấm nút (edge-trigger + cooldown), không vẽ
+        const pinchEdge = this.lastGesture !== 'PINCH';
+        if (pinchEdge && overUI) {
+          const now = performance.now();
+          if (now - this.lastUiClick > UI_CLICK_COOLDOWN) {
+            (this.hoveredEl as HTMLElement | null)?.click();
+            this.lastUiClick = now;
+          }
+          this.uiPinchActive = true;
+        }
+        // Pinch bắt đầu trên UI → không vẽ cho tới khi thả tay
+        if (this.uiPinchActive) break;
+
         this.controls.enabled = false;  // Tắt orbit khi vẽ
         this.strokeEngine.addPoint(worldPos);
         this.isDrawing = true;
         this.updateCursorIndicator(worldPos, true);
         break;
+      }
 
       case 'POINT':
         // Di chuyển cursor
+        this.uiPinchActive = false;
         if (this.isDrawing) {
           this.stopDrawing();
           this.positionMapper.reset();  // Reset filter tránh lurch
@@ -285,12 +318,14 @@ class AirPaintApp {
 
       case 'FIST':
         // Dừng hẳn
+        this.uiPinchActive = false;
         this.stopDrawing();
         break;
 
       case 'SPREAD':
         // Edge-trigger: chỉ undo MỘT LẦN khi gesture chuyển sang SPREAD,
         // nếu không giữ tay xòe 1 giây sẽ xóa sạch ~30 strokes
+        this.uiPinchActive = false;
         if (this.lastGesture !== 'SPREAD') {
           this.undo();
         }
@@ -298,6 +333,44 @@ class AirPaintApp {
     }
 
     this.lastGesture = event.gesture;
+  }
+
+  // ────────────────────────────────────────────────────────
+  // HAND CURSOR — con trỏ theo ngón trỏ, bấm nút bằng PINCH
+  // ────────────────────────────────────────────────────────
+
+  /** Cập nhật vị trí con trỏ tay trên màn hình. Trả về true nếu đang trỏ vào UI. */
+  private updateHandCursor(event: GestureEvent): boolean {
+    if (!this.handCursorEl) {
+      this.handCursorEl = document.getElementById('hand-cursor');
+    }
+    const el = this.handCursorEl;
+    if (!el) return false;
+
+    if (event.gesture === 'NONE') {
+      el.classList.add('hidden');
+      this.setHovered(null);
+      return false;
+    }
+
+    // Flip X — khớp với hình ảnh gương của camera
+    const x = (1 - event.indexTip.x) * window.innerWidth;
+    const y = event.indexTip.y * window.innerHeight;
+    el.classList.remove('hidden');
+    el.style.transform = `translate(${x}px, ${y}px)`;
+    el.classList.toggle('pinching', event.gesture === 'PINCH');
+
+    // #hand-cursor có pointer-events: none nên không tự che elementFromPoint
+    const target = document.elementFromPoint(x, y)?.closest(UI_SELECTOR) ?? null;
+    this.setHovered(target);
+    return target !== null;
+  }
+
+  private setHovered(el: Element | null): void {
+    if (this.hoveredEl === el) return;
+    this.hoveredEl?.classList.remove('gesture-hover');
+    el?.classList.add('gesture-hover');
+    this.hoveredEl = el;
   }
 
   private stopDrawing(): void {
@@ -506,6 +579,16 @@ class AirPaintApp {
         el.classList.add('active');
         this.currentColor = el.dataset.color!;
         this.strokeEngine.setOptions({ color: this.currentColor });
+      });
+    });
+
+    // Brush types
+    document.querySelectorAll<HTMLElement>('[data-brush]').forEach(el => {
+      el.addEventListener('click', () => {
+        document.querySelectorAll('[data-brush]').forEach(b => b.classList.remove('active'));
+        el.classList.add('active');
+        this.currentBrush = el.dataset.brush as BrushType;
+        this.strokeEngine.setOptions({ brushType: this.currentBrush });
       });
     });
 

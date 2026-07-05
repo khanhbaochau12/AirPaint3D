@@ -1,9 +1,13 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter';
 
+/** Loại bút — quyết định material của nét vẽ. */
+export type BrushType = 'normal' | 'neon' | 'glass';
+
 export interface StrokeOptions {
   color: THREE.Color | string | number;
   brushRadius: number;   // world units, default 0.015
+  brushType: BrushType;
   emissiveIntensity?: number;
 }
 
@@ -12,6 +16,8 @@ export interface StrokeData {
   points: THREE.Vector3[];
   color: string;
   radius: number;
+  /** Dữ liệu cũ không có field này — hydrate mặc định 'normal'. */
+  brush?: BrushType;
   timestamp: number;
 }
 
@@ -42,6 +48,7 @@ export class StrokeEngine {
     this.options = {
       color: '#63b3ed',
       brushRadius: 0.015,
+      brushType: 'normal',
       emissiveIntensity: 0.35,
       ...opts,
     };
@@ -88,6 +95,7 @@ export class StrokeEngine {
       points:    [...this.activePoints],
       color:     `#${new THREE.Color(this.options.color).getHexString()}`,
       radius:    this.options.brushRadius,
+      brush:     this.options.brushType,
       timestamp: Date.now(),
     };
 
@@ -257,7 +265,8 @@ export class StrokeEngine {
 
     // 4. Lấy / tạo material từ cache
     const mat = this.getOrCreateMaterial(
-      new THREE.Color(this.options.color).getHexString()
+      new THREE.Color(this.options.color).getHexString(),
+      this.options.brushType
     );
 
     // 5. Tạo mesh và thêm vào scene
@@ -266,21 +275,40 @@ export class StrokeEngine {
     this.scene.add(this.activeMesh);
   }
 
-  private getOrCreateMaterial(hexKey: string): THREE.MeshStandardMaterial {
-    if (this.materialCache.has(hexKey)) {
-      return this.materialCache.get(hexKey)!;
+  private getOrCreateMaterial(hexKey: string, type: BrushType): THREE.MeshStandardMaterial {
+    const cacheKey = `${type}_${hexKey}`;
+    if (this.materialCache.has(cacheKey)) {
+      return this.materialCache.get(cacheKey)!;
     }
 
     const color = new THREE.Color(`#${hexKey}`);
-    const mat = new THREE.MeshStandardMaterial({
-      color,
-      emissive:          color,
-      emissiveIntensity: this.options.emissiveIntensity ?? 0.35,
-      roughness:         0.3,
-      metalness:         0.1,
-    });
 
-    this.materialCache.set(hexKey, mat);
+    // Mỗi loại bút một bộ tham số material riêng
+    const params: THREE.MeshStandardMaterialParameters = {
+      color,
+      emissive: color,
+    };
+    switch (type) {
+      case 'neon':
+        params.emissiveIntensity = 1.4;
+        params.roughness = 0.15;
+        params.metalness = 0;
+        break;
+      case 'glass':
+        params.emissiveIntensity = 0.15;
+        params.roughness = 0.05;
+        params.metalness = 0.3;
+        params.transparent = true;
+        params.opacity = 0.45;
+        break;
+      default:
+        params.emissiveIntensity = this.options.emissiveIntensity ?? 0.35;
+        params.roughness = 0.3;
+        params.metalness = 0.1;
+    }
+
+    const mat = new THREE.MeshStandardMaterial(params);
+    this.materialCache.set(cacheKey, mat);
     return mat;
   }
 
@@ -294,7 +322,10 @@ export class StrokeEngine {
     const pts   = data.points.map(p => new THREE.Vector3(p.x, p.y, p.z));
     const curve = new THREE.CatmullRomCurve3(pts);
     const geo   = new THREE.TubeGeometry(curve, Math.min(pts.length * 4, 300), data.radius, 8, false);
-    const mat   = this.getOrCreateMaterial(new THREE.Color(data.color).getHexString());
+    const mat   = this.getOrCreateMaterial(
+      new THREE.Color(data.color).getHexString(),
+      data.brush ?? 'normal'
+    );
 
     const mesh  = new THREE.Mesh(geo, mat);
     mesh.name   = `remote_stroke_${data.id}`;

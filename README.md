@@ -58,10 +58,15 @@ air-paint-3d/
 | ☝ **POINT** — chỉ ngón trỏ | Di chuyển cursor (không vẽ) |
 | ✊ **FIST** — nắm tay | Kết thúc stroke hiện tại |
 | 🖐 **SPREAD** — xòe bàn tay | Xóa stroke cuối (edge-triggered — mỗi lần xòe chỉ xóa 1 nét) |
+| ☝ chỉ vào nút + 🤏 chụm | Bấm nút công cụ / chọn màu / chọn loại bút |
 
-Ứng dụng điều khiển **100% bằng cử chỉ tay** — camera là bắt buộc. Bảng chỉ dẫn
-cử chỉ luôn hiển thị ở góc dưới-trái khung vẽ. Chuột chỉ dùng để xoay/zoom góc nhìn
-(OrbitControls) và bấm các nút toolbar.
+Ứng dụng điều khiển **100% bằng cử chỉ tay** — camera là bắt buộc. Con trỏ tay
+(vòng tròn) theo ngón trỏ trên màn hình; trỏ vào nút bất kỳ rồi chụm để bấm —
+toàn bộ toolbar, bảng màu và loại bút đều thao tác được bằng tay. Bảng chỉ dẫn
+cử chỉ luôn hiển thị ở góc dưới-trái khung vẽ. Chuột chỉ dùng để xoay/zoom góc
+nhìn (OrbitControls).
+
+**Loại bút:** Bút thường · Bút neon (phát sáng mạnh) · Bút trong mờ (bán trong suốt).
 
 ---
 
