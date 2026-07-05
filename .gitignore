@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.idea/
+.vscode/
+*.local
+.DS_Store
+*.zip
+.claude/
+CLAUDE.md
