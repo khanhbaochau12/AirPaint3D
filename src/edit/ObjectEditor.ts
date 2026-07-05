@@ -24,6 +24,13 @@ const SCALE_LIMITS   = [0.05, 8] as const;
 export class ObjectEditor {
   tool: EditTool = 'move';
 
+  /**
+   * Dung sai chọn vật thể (bán kính NDC). Nét vẽ rất mảnh (~0.015 world),
+   * tay run khó trỏ trúng — khi ray chính giữa trượt, quét thêm vòng
+   * offset quanh con trỏ. Chỉnh được từ panel Tinh chỉnh.
+   */
+  pickTolerance = 0.02;
+
   private scene: THREE.Scene;
   private getTargets: () => THREE.Object3D[];
   private onChanged?: (obj: THREE.Object3D) => void;
@@ -59,14 +66,30 @@ export class ObjectEditor {
   updateHover(ndc: THREE.Vector2, camera: THREE.Camera): void {
     if (this.grabbed) return;   // đang kéo thì không đổi hover
 
-    this.raycaster.setFromCamera(ndc, camera);
-    const hits = this.raycaster.intersectObjects(this.getTargets(), false);
-    const target = hits[0]?.object ?? null;
+    let target = this.raycastAt(ndc.x, ndc.y, camera);
+
+    // Fat-ray: trượt thì quét 2 vòng offset quanh con trỏ
+    if (!target && this.pickTolerance > 0) {
+      outer:
+      for (const ring of [0.5, 1]) {
+        const r = this.pickTolerance * ring;
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2;
+          target = this.raycastAt(ndc.x + Math.cos(a) * r, ndc.y + Math.sin(a) * r, camera);
+          if (target) break outer;
+        }
+      }
+    }
 
     if (target !== this.hovered) {
       this.hovered = target;
       this.refreshBox();
     }
+  }
+
+  private raycastAt(x: number, y: number, camera: THREE.Camera): THREE.Object3D | null {
+    this.raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+    return this.raycaster.intersectObjects(this.getTargets(), false)[0]?.object ?? null;
   }
 
   /** PINCH edge: grab vật thể đang hover (nếu có). */

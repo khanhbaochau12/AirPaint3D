@@ -96,6 +96,28 @@
       border-radius: 12px; padding: 8px 12px; backdrop-filter: blur(8px);
     }
 
+    /* ── Panel tinh chỉnh ──────────────────────── */
+    #settings-panel {
+      position: fixed; left: 16px; top: 50%; transform: translateY(-50%);
+      z-index: 10; display: flex; flex-direction: column; gap: 12px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 14px; backdrop-filter: blur(8px);
+      width: 230px; max-height: 80vh; overflow-y: auto;
+    }
+    #settings-panel .legend-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+      color: var(--muted);
+    }
+    .set-row label {
+      display: flex; justify-content: space-between;
+      font-size: 12px; color: var(--text); margin-bottom: 6px;
+    }
+    .set-val { color: var(--accent); font-weight: 600; }
+    .set-controls { display: flex; align-items: center; gap: 6px; }
+    .set-controls input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+    .ctrl-btn.mini { padding: 3px 9px; font-size: 14px; line-height: 1; }
+    .set-hint { font-size: 10px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+
     /* ── Thư viện hình khối ────────────────────── */
     #shape-library {
       position: fixed; right: 16px; top: 50%; transform: translateY(-50%);
@@ -263,6 +285,7 @@
     </div>
     <div class="tb-group">
       <button class="ctrl-btn" id="btn-library">Thư viện</button>
+      <button class="ctrl-btn" id="btn-settings">Tinh chỉnh</button>
       <button class="ctrl-btn" id="btn-undo" title="Ctrl+Z">Hoàn tác</button>
       <button class="ctrl-btn" id="btn-redo" title="Ctrl+Y">Làm lại</button>
       <button class="ctrl-btn" id="btn-clear" title="Shift+Delete">Xóa hết</button>
@@ -277,6 +300,62 @@
     <button class="ctrl-btn" data-tool="rotate">Xoay</button>
     <button class="ctrl-btn" data-tool="scale">Thu phóng</button>
     <button class="ctrl-btn danger" id="btn-delete-object">Xóa vật thể</button>
+  </div>
+
+  <!-- Panel tinh chỉnh — hiệu chỉnh theo webcam từng người -->
+  <div id="settings-panel" class="hidden">
+    <div class="legend-title">Tinh chỉnh</div>
+
+    <div class="set-row">
+      <label>Độ mượt tay <span class="set-val" id="val-smooth">50</span></label>
+      <div class="set-controls">
+        <button class="ctrl-btn mini" data-step="smooth:-10">–</button>
+        <input type="range" id="set-smooth" min="0" max="100" step="5" value="50" />
+        <button class="ctrl-btn mini" data-step="smooth:+10">+</button>
+      </div>
+      <p class="set-hint">Cao = mượt nhưng trễ · Thấp = nhạy nhưng rung</p>
+    </div>
+
+    <div class="set-row">
+      <label>Độ nhạy chụm <span class="set-val" id="val-pinch">50</span></label>
+      <div class="set-controls">
+        <button class="ctrl-btn mini" data-step="pinch:-5">–</button>
+        <input type="range" id="set-pinch" min="30" max="90" step="5" value="50" />
+        <button class="ctrl-btn mini" data-step="pinch:+5">+</button>
+      </div>
+      <p class="set-hint">Cao = dễ nhận chụm hơn (tay nhỏ / ngồi xa camera)</p>
+    </div>
+
+    <div class="set-row">
+      <label>Dung sai chọn vật <span class="set-val" id="val-pick">35</span></label>
+      <div class="set-controls">
+        <button class="ctrl-btn mini" data-step="pick:-10">–</button>
+        <input type="range" id="set-pick" min="0" max="100" step="5" value="35" />
+        <button class="ctrl-btn mini" data-step="pick:+10">+</button>
+      </div>
+      <p class="set-hint">Cao = dễ chụp trúng nét mảnh khi tay run</p>
+    </div>
+
+    <div class="set-row">
+      <label>Độ sáng neon <span class="set-val" id="val-bloom">85</span></label>
+      <div class="set-controls">
+        <button class="ctrl-btn mini" data-step="bloom:-20">–</button>
+        <input type="range" id="set-bloom" min="0" max="200" step="5" value="85" />
+        <button class="ctrl-btn mini" data-step="bloom:+20">+</button>
+      </div>
+      <p class="set-hint">0 = tắt phát sáng (máy yếu chạy nhanh hơn)</p>
+    </div>
+
+    <div class="set-row">
+      <label>Chất lượng tracking</label>
+      <div class="set-controls">
+        <button class="ctrl-btn" data-quality="0">Nhanh</button>
+        <button class="ctrl-btn active" data-quality="1">Chính xác</button>
+      </div>
+      <p class="set-hint">Máy yếu / lag thì chọn Nhanh</p>
+    </div>
+
+    <button class="ctrl-btn" id="btn-settings-reset">Đặt lại mặc định</button>
   </div>
 
   <!-- Thư viện hình khối -->

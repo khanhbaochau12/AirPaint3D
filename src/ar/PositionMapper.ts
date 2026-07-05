@@ -36,6 +36,12 @@ class KalmanFilter1D {
     return this.x;
   }
 
+  /** Đổi tham số nhiễu lúc chạy (panel Tinh chỉnh). */
+  setNoise(R: number, Q: number): void {
+    this.R = R;
+    this.Q = Q;
+  }
+
   reset(value: number = 0): void {
     this.x = value;
     this.P = 1;
@@ -152,6 +158,21 @@ export class PositionMapper {
     this.prevPos = pos.clone();
 
     return pos;
+  }
+
+  /**
+   * Chỉnh độ mượt lúc chạy — s trong [0, 1].
+   * s = 0: phản ứng nhanh nhất (ít lọc, theo tay sát nhưng rung);
+   * s = 1: mượt nhất (lọc mạnh, trễ hơn). s = 0.5 = mặc định gốc.
+   */
+  setSmoothing(s: number): void {
+    const t = THREE.MathUtils.clamp(s, 0, 1);
+    // Mapping mũ quanh giá trị mặc định R=0.01, Q=0.1
+    const r = 0.01 * Math.pow(4, 2 * t - 1);   // 0.0025 → 0.04
+    const q = 0.1  * Math.pow(4, 1 - 2 * t);   // 0.4    → 0.025
+    this.kX.setNoise(r, q);
+    this.kY.setNoise(r, q);
+    this.kZ.setNoise(r * 5, q * 0.5);          // Z luôn smooth hơn
   }
 
   /** Reset filter khi mất tracking để tránh lurch khi phát hiện lại. */

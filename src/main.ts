@@ -29,8 +29,22 @@ const COLORS = {
 };
 
 const STORAGE_KEY     = 'airpaint3d_scene_v1';
+const SETTINGS_KEY    = 'airpaint3d_settings_v1';
 const AUTOSAVE_DELAY  = 500;   // ms debounce
 const CURSOR_SYNC_FPS = 30;
+
+// Tinh chỉnh theo webcam/tay từng người — panel "Tinh chỉnh"
+interface TuningSettings {
+  smooth:  number;   // 0–100: độ mượt tay (Kalman)
+  pinch:   number;   // 30–90: ngưỡng chụm ×1000 (cao = dễ chụm)
+  pick:    number;   // 0–100: dung sai chọn vật thể
+  bloom:   number;   // 0–200: cường độ phát sáng ×100
+  quality: 0 | 1;    // model tracking: 0 = nhanh, 1 = chính xác
+}
+const DEFAULT_SETTINGS: TuningSettings = {
+  smooth: 50, pinch: 50, pick: 35, bloom: 85, quality: 1,
+};
+const PICK_TOLERANCE_MAX = 0.06;   // bán kính NDC khi pick = 100
 
 // Các element có thể bấm bằng cử chỉ tay (chỉ ngón trỏ + chụm)
 const UI_SELECTOR       = '.ctrl-btn, .color-swatch, [data-brush]';
@@ -80,7 +94,9 @@ class AirPaintApp {
   private camera!: THREE.PerspectiveCamera;
   private controls!: OrbitControls;
   private composer!: EffectComposer;
+  private bloomPass!: UnrealBloomPass;
   private clock = new THREE.Clock();
+  private settings: TuningSettings = { ...DEFAULT_SETTINGS };
 
   // Core modules
   private strokeEngine!: StrokeEngine;
@@ -130,6 +146,7 @@ class AirPaintApp {
     this.setupARButton();
     this.setupMultiplayer();
     this.restoreFromStorage();
+    this.loadSettings();
 
     // Camera được bật từ overlay onboarding —
     // getUserMedia + requestSession cần user gesture mới thân thiện.
@@ -236,10 +253,11 @@ class AirPaintApp {
     this.composer.setSize(window.innerWidth, window.innerHeight);
 
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.composer.addPass(new UnrealBloomPass(
+    this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
       BLOOM_STRENGTH, BLOOM_RADIUS, BLOOM_THRESHOLD
-    ));
+    );
+    this.composer.addPass(this.bloomPass);
     this.composer.addPass(new OutputPass());
   }
 
@@ -339,6 +357,8 @@ class AirPaintApp {
     this.gestureDetector = new GestureDetector((event: GestureEvent) => {
       this.handleGesture(event);
     });
+    // Detector tạo sau khi camera bật — áp lại cài đặt liên quan
+    this.applySettings();
   }
 
   private handleGesture(event: GestureEvent): void {
@@ -742,6 +762,99 @@ class AirPaintApp {
   }
 
   // ────────────────────────────────────────────────────────
+  // TINH CHỈNH — thanh trượt hiệu chỉnh theo webcam từng người
+  // ────────────────────────────────────────────────────────
+
+  private loadSettings(): void {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) this.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    } catch {
+      this.settings = { ...DEFAULT_SETTINGS };
+    }
+    this.applySettings();
+    this.refreshSettingsUI();
+  }
+
+  private saveSettings(): void {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
+    } catch { /* storage đầy — bỏ qua */ }
+  }
+
+  /** Đẩy giá trị settings vào các module đang chạy. */
+  private applySettings(): void {
+    const s = this.settings;
+    this.positionMapper.setSmoothing(s.smooth / 100);
+    this.editor.pickTolerance = (s.pick / 100) * PICK_TOLERANCE_MAX;
+    this.bloomPass.strength = s.bloom / 100;
+    this.gestureDetector?.setPinchThreshold(s.pinch / 1000);
+    this.gestureDetector?.setModelComplexity(s.quality);
+  }
+
+  /** Đồng bộ giá trị hiện tại lên slider + label của panel. */
+  private refreshSettingsUI(): void {
+    (['smooth', 'pinch', 'pick', 'bloom'] as const).forEach(key => {
+      const slider = document.getElementById(`set-${key}`) as HTMLInputElement | null;
+      const label  = document.getElementById(`val-${key}`);
+      if (slider) slider.value = String(this.settings[key]);
+      if (label)  label.textContent = String(this.settings[key]);
+    });
+    document.querySelectorAll<HTMLElement>('[data-quality]').forEach(b => {
+      b.classList.toggle('active', Number(b.dataset.quality) === this.settings.quality);
+    });
+  }
+
+  private setupSettingsUI(): void {
+    document.getElementById('btn-settings')?.addEventListener('click', () => {
+      document.getElementById('settings-panel')?.classList.toggle('hidden');
+    });
+
+    // Slider kéo bằng chuột
+    (['smooth', 'pinch', 'pick', 'bloom'] as const).forEach(key => {
+      document.getElementById(`set-${key}`)?.addEventListener('input', (e) => {
+        this.settings[key] = parseInt((e.target as HTMLInputElement).value);
+        this.applySettings();
+        this.saveSettings();
+        this.refreshSettingsUI();
+      });
+    });
+
+    // Nút −/+ để chỉnh bằng cử chỉ tay (data-step="key:delta")
+    document.querySelectorAll<HTMLElement>('[data-step]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const [key, delta] = btn.dataset.step!.split(':') as [
+          'smooth' | 'pinch' | 'pick' | 'bloom', string,
+        ];
+        const slider = document.getElementById(`set-${key}`) as HTMLInputElement | null;
+        const min = slider ? parseInt(slider.min) : 0;
+        const max = slider ? parseInt(slider.max) : 100;
+        this.settings[key] = THREE.MathUtils.clamp(this.settings[key] + parseInt(delta), min, max);
+        this.applySettings();
+        this.saveSettings();
+        this.refreshSettingsUI();
+      });
+    });
+
+    // Chất lượng tracking: nhanh / chính xác
+    document.querySelectorAll<HTMLElement>('[data-quality]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.settings.quality = Number(btn.dataset.quality) as 0 | 1;
+        this.applySettings();
+        this.saveSettings();
+        this.refreshSettingsUI();
+      });
+    });
+
+    document.getElementById('btn-settings-reset')?.addEventListener('click', () => {
+      this.settings = { ...DEFAULT_SETTINGS };
+      this.applySettings();
+      this.saveSettings();
+      this.refreshSettingsUI();
+    });
+  }
+
+  // ────────────────────────────────────────────────────────
   // SNAPSHOT — chụp PNG
   // ────────────────────────────────────────────────────────
 
@@ -835,6 +948,8 @@ class AirPaintApp {
     document.getElementById('btn-delete-object')?.addEventListener('click', () => {
       this.deleteSelectedObject();
     });
+
+    this.setupSettingsUI();
 
     document.getElementById('btn-undo')?.addEventListener('click', () => this.undo());
     document.getElementById('btn-redo')?.addEventListener('click', () => this.redo());

@@ -82,6 +82,10 @@ kéo xuống = nhỏ). Nút "Xóa vật thể" xóa vật đang chọn. Mọi th
 Khung cảnh có sàn lưới + trường sao tạo chiều sâu; camera PiP hiển thị **skeleton
 21 khớp tay** đang được track; rảnh tay 15 giây thì scene tự xoay khoe tranh.
 
+**Panel Tinh chỉnh** (webcam mỗi người mỗi khác): độ mượt tay (Kalman), độ nhạy
+chụm, dung sai chọn vật thể, độ sáng neon, chất lượng tracking nhanh/chính xác —
+chỉnh bằng slider hoặc nút +/− (bấm được bằng cử chỉ), tự lưu vào localStorage.
+
 ---
 
 ## Luồng kỹ thuật

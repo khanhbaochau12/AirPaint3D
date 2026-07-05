@@ -45,6 +45,10 @@ export class GestureDetector {
   // chậm hơn render loop; frame mới sẽ bị skip thay vì xếp hàng.
   private busy = false;
 
+  // Ngưỡng khoảng cách cái–trỏ để nhận PINCH — chỉnh được từ panel Tinh chỉnh
+  // (webcam/kích thước tay mỗi người mỗi khác)
+  private pinchThreshold = 0.05;
+
   constructor(callback: (event: GestureEvent) => void) {
     this.callback = callback;
 
@@ -85,6 +89,16 @@ export class GestureDetector {
     } finally {
       this.busy = false;
     }
+  }
+
+  /** Ngưỡng nhận PINCH (0.03–0.09). Cao hơn = dễ chụm hơn. */
+  setPinchThreshold(v: number): void {
+    this.pinchThreshold = v;
+  }
+
+  /** 0 = lite (nhanh, máy yếu), 1 = full (chính xác hơn). */
+  setModelComplexity(c: 0 | 1): void {
+    this.hands.setOptions({ modelComplexity: c });
   }
 
   // ──────────────────────────────────────────────────────────
@@ -147,7 +161,7 @@ export class GestureDetector {
 
     const extCount = [indexExt, middleExt, ringExt, pinkyExt].filter(Boolean).length;
 
-    if (pinchDist < 0.05)                         return 'PINCH';   // ✌ vẽ
+    if (pinchDist < this.pinchThreshold)           return 'PINCH';   // 🤏 vẽ
     if (extCount === 0)                            return 'FIST';    // ✊ dừng / menu
     if (extCount >= 4)                             return 'SPREAD';  // 🖐 xóa
     if (indexExt && !middleExt && !ringExt)        return 'POINT';   // ☝ cursor

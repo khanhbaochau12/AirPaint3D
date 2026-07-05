@@ -209,6 +209,7 @@ dùng đúng 4 icon cử chỉ (🤏 ☝ ✊ 🖐), mọi nút chức năng dùn
 | Thư viện hình khối | Panel phải | 6 primitive (hộp, cầu, trụ, nón, vòng xuyến, nút xoắn) — chụm để thả vào trước camera, tự chuyển sang chế độ chỉnh sửa |
 | Công cụ chỉnh sửa | Trên toolbar | Di chuyển / Xoay / Thu phóng vật thể (cả nét vẽ lẫn hình khối) bằng cách chụm-kéo; Xóa vật thể đang chọn |
 | Skeleton tay | Trên camera PiP | Vẽ 21 khớp + khung xương realtime — trực quan hóa tracking |
+| Panel Tinh chỉnh | Panel trái | Hiệu chỉnh theo webcam/tay từng người: độ mượt Kalman, ngưỡng chụm, dung sai chọn vật (fat-ray), cường độ bloom, model tracking nhanh/chính xác; slider + nút +/− (bấm được bằng cử chỉ), lưu localStorage riêng |
 | Nút "Chế độ AR" | Góc trên-phải | Chỉ hiện trên thiết bị hỗ trợ immersive-ar |
 
 Xử lý lỗi thân thiện: camera bị từ chối → thông báo hướng dẫn cấp quyền và nút
