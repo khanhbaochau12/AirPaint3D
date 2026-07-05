@@ -74,11 +74,41 @@
     .ctrl-btn:hover { background: rgba(99, 179, 237, 0.28); }
     .ctrl-btn:disabled { opacity: .4; cursor: default; }
 
-    .brush-types { display: flex; gap: 6px; }
-    .brush-types .ctrl-btn.active {
+    .brush-types, .mode-seg, .tb-group { display: flex; gap: 6px; align-items: center; }
+    .brush-types .ctrl-btn.active, .mode-seg .ctrl-btn.active,
+    #edit-tools .ctrl-btn.active {
       background: var(--accent); color: #0a0f1e; border-color: var(--accent);
       font-weight: 600;
     }
+    .ctrl-btn.danger {
+      background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.4);
+    }
+    .ctrl-btn.danger:hover { background: rgba(248, 113, 113, 0.3); }
+
+    /* Toolbar thu gọn — chỉ còn nút "Công cụ" */
+    #toolbar.collapsed .tb-group { display: none; }
+
+    /* ── Panel công cụ chỉnh sửa ───────────────── */
+    #edit-tools {
+      position: fixed; bottom: 76px; left: 50%; transform: translateX(-50%);
+      z-index: 10; display: flex; gap: 6px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 8px 12px; backdrop-filter: blur(8px);
+    }
+
+    /* ── Thư viện hình khối ────────────────────── */
+    #shape-library {
+      position: fixed; right: 16px; top: 50%; transform: translateY(-50%);
+      z-index: 10; display: flex; flex-direction: column; gap: 8px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 12px; backdrop-filter: blur(8px);
+      width: 150px;
+    }
+    #shape-library .legend-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+      color: var(--muted); margin-bottom: 2px;
+    }
+    #shape-library .ctrl-btn { width: 100%; }
 
     /* Highlight khi con trỏ tay đang trỏ vào — chụm để bấm */
     .gesture-hover { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.85) !important; }
@@ -95,6 +125,21 @@
       background: rgba(99, 179, 237, 0.4);
       border-color: #fff;
     }
+    /* Vòng pulse tỏa ra liên tục quanh con trỏ */
+    #hand-cursor::after {
+      content: ''; position: absolute; inset: -2px;
+      border-radius: 50%; border: 2px solid var(--accent);
+      animation: cursor-pulse 1.6s ease-out infinite;
+    }
+    @keyframes cursor-pulse {
+      0%   { transform: scale(1);   opacity: .7; }
+      100% { transform: scale(2.1); opacity: 0; }
+    }
+
+    #gesture-legend .legend-edit {
+      max-width: 210px; line-height: 1.4; margin-top: 4px;
+      padding-top: 6px; border-top: 1px solid var(--border);
+    }
 
     #btn-ar { background: rgba(52, 211, 153, 0.15); border-color: rgba(52, 211, 153, 0.4); }
 
@@ -107,6 +152,11 @@
     #camera-pip video {
       width: 100%; height: 100%; object-fit: cover;
       transform: scaleX(-1);   /* mirror — khớp với chuyển động tay */
+    }
+    /* Skeleton 21 khớp tay vẽ đè lên video */
+    #pip-skeleton {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      pointer-events: none;
     }
 
     /* ── Onboarding overlay ────────────────────── */
@@ -189,7 +239,12 @@
 
   <!-- Toolbar -->
   <div id="toolbar">
-    <div class="swatches">
+    <button class="ctrl-btn" id="btn-toolbar-toggle">Công cụ</button>
+    <div class="tb-group mode-seg">
+      <button class="ctrl-btn active" data-mode="draw">Vẽ</button>
+      <button class="ctrl-btn" data-mode="edit">Chỉnh sửa</button>
+    </div>
+    <div class="tb-group swatches">
       <div class="color-swatch active" data-color="#63b3ed" style="background:#63b3ed"></div>
       <div class="color-swatch" data-color="#a78bfa" style="background:#a78bfa"></div>
       <div class="color-swatch" data-color="#34d399" style="background:#34d399"></div>
@@ -197,24 +252,48 @@
       <div class="color-swatch" data-color="#fb923c" style="background:#fb923c"></div>
       <div class="color-swatch" data-color="#f87171" style="background:#f87171"></div>
     </div>
-    <div class="brush-types">
+    <div class="tb-group brush-types">
       <button class="ctrl-btn active" data-brush="normal">Bút thường</button>
       <button class="ctrl-btn" data-brush="neon">Bút neon</button>
       <button class="ctrl-btn" data-brush="glass">Bút trong mờ</button>
     </div>
-    <div class="brush-wrap">
+    <div class="tb-group brush-wrap">
       <span>Cỡ bút</span>
       <input type="range" id="brush-size" min="2" max="50" value="15" />
     </div>
-    <button class="ctrl-btn" id="btn-undo" title="Ctrl+Z">Hoàn tác</button>
-    <button class="ctrl-btn" id="btn-redo" title="Ctrl+Y">Làm lại</button>
-    <button class="ctrl-btn" id="btn-clear" title="Shift+Delete">Xóa hết</button>
-    <button class="ctrl-btn" id="btn-snapshot" title="Ctrl+S">Lưu PNG</button>
-    <button class="ctrl-btn" id="btn-export" title="Ctrl+E">Xuất GLTF</button>
+    <div class="tb-group">
+      <button class="ctrl-btn" id="btn-library">Thư viện</button>
+      <button class="ctrl-btn" id="btn-undo" title="Ctrl+Z">Hoàn tác</button>
+      <button class="ctrl-btn" id="btn-redo" title="Ctrl+Y">Làm lại</button>
+      <button class="ctrl-btn" id="btn-clear" title="Shift+Delete">Xóa hết</button>
+      <button class="ctrl-btn" id="btn-snapshot" title="Ctrl+S">Lưu PNG</button>
+      <button class="ctrl-btn" id="btn-export" title="Ctrl+E">Xuất GLTF</button>
+    </div>
   </div>
 
-  <!-- Camera picture-in-picture -->
-  <div id="camera-pip" class="hidden"></div>
+  <!-- Công cụ chỉnh sửa — chỉ hiện ở chế độ Chỉnh sửa -->
+  <div id="edit-tools" class="hidden">
+    <button class="ctrl-btn active" data-tool="move">Di chuyển</button>
+    <button class="ctrl-btn" data-tool="rotate">Xoay</button>
+    <button class="ctrl-btn" data-tool="scale">Thu phóng</button>
+    <button class="ctrl-btn danger" id="btn-delete-object">Xóa vật thể</button>
+  </div>
+
+  <!-- Thư viện hình khối -->
+  <div id="shape-library" class="hidden">
+    <div class="legend-title">Thư viện hình khối</div>
+    <button class="ctrl-btn" data-shape="box">Khối hộp</button>
+    <button class="ctrl-btn" data-shape="sphere">Khối cầu</button>
+    <button class="ctrl-btn" data-shape="cylinder">Khối trụ</button>
+    <button class="ctrl-btn" data-shape="cone">Khối nón</button>
+    <button class="ctrl-btn" data-shape="torus">Vòng xuyến</button>
+    <button class="ctrl-btn" data-shape="knot">Nút xoắn</button>
+  </div>
+
+  <!-- Camera picture-in-picture + skeleton tay -->
+  <div id="camera-pip" class="hidden">
+    <canvas id="pip-skeleton"></canvas>
+  </div>
 
   <!-- Bảng chỉ dẫn cử chỉ nhỏ ở góc khung vẽ -->
   <div id="gesture-legend" class="hidden">
@@ -224,6 +303,7 @@
     <div class="legend-row"><span class="icon">✊</span><b>Nắm</b> — kết thúc nét</div>
     <div class="legend-row"><span class="icon">🖐</span><b>Xòe</b> — xóa nét cuối</div>
     <div class="legend-row"><span class="icon">☝</span><b>Trỏ nút</b> + 🤏 — bấm nút</div>
+    <div class="legend-row legend-edit"><span class="icon">🤏</span><b>Chế độ sửa</b> — chụm vật thể để kéo / xoay / thu phóng</div>
   </div>
 
   <!-- Con trỏ tay -->

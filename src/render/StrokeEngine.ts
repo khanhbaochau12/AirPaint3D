@@ -18,6 +18,12 @@ export interface StrokeData {
   radius: number;
   /** Dữ liệu cũ không có field này — hydrate mặc định 'normal'. */
   brush?: BrushType;
+  /** Transform sau khi chỉnh sửa (di chuyển/xoay/thu phóng). Optional — tương thích ngược. */
+  transform?: {
+    position: [number, number, number];
+    rotation: [number, number, number];
+    scale:    [number, number, number];
+  };
   timestamp: number;
 }
 
@@ -99,6 +105,10 @@ export class StrokeEngine {
       timestamp: Date.now(),
     };
 
+    // Recenter: dời gốc geometry về tâm bounding box để xoay/thu phóng
+    // trong chế độ chỉnh sửa quay quanh tâm nét thay vì gốc tọa độ world
+    this.recenterMesh(this.activeMesh);
+
     this.committedStrokes.push({ mesh: this.activeMesh, data });
     this.activeMesh = null;
     this.activePoints = [];
@@ -108,6 +118,14 @@ export class StrokeEngine {
 
     this.onStrokeCommitted?.(data);
     return data;
+  }
+
+  private recenterMesh(mesh: THREE.Mesh): void {
+    mesh.geometry.computeBoundingBox();
+    const center = new THREE.Vector3();
+    mesh.geometry.boundingBox!.getCenter(center);
+    mesh.geometry.translate(-center.x, -center.y, -center.z);
+    mesh.position.add(center);
   }
 
   /** Xóa stroke cuối cùng (Ctrl+Z). Trả về id stroke đã xóa để broadcast. */
@@ -140,6 +158,35 @@ export class StrokeEngine {
     this.scene.remove(entry.mesh);
     entry.mesh.geometry.dispose();
     // Material có thể đang được dùng bởi stroke khác, không dispose
+  }
+
+  /** Xóa stroke theo mesh (chế độ chỉnh sửa). Trả về true nếu mesh là stroke. */
+  removeByMesh(mesh: THREE.Object3D): boolean {
+    const idx = this.committedStrokes.findIndex(s => s.mesh === mesh);
+    if (idx === -1) return false;
+
+    const [entry] = this.committedStrokes.splice(idx, 1);
+    this.scene.remove(entry.mesh);
+    entry.mesh.geometry.dispose();
+    return true;
+  }
+
+  /** Danh sách mesh đã commit — dùng cho raycast chọn vật thể. */
+  get meshes(): THREE.Mesh[] {
+    return this.committedStrokes.map(s => s.mesh);
+  }
+
+  /** Lưu transform hiện tại của mesh vào data (sau khi kéo/xoay/scale). */
+  syncTransform(mesh: THREE.Object3D): boolean {
+    const entry = this.committedStrokes.find(s => s.mesh === mesh);
+    if (!entry) return false;
+
+    entry.data.transform = {
+      position: [mesh.position.x, mesh.position.y, mesh.position.z],
+      rotation: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
+      scale:    [mesh.scale.x, mesh.scale.y, mesh.scale.z],
+    };
+    return true;
   }
 
   /** Xóa toàn bộ canvas. */
@@ -329,6 +376,17 @@ export class StrokeEngine {
 
     const mesh  = new THREE.Mesh(geo, mat);
     mesh.name   = `remote_stroke_${data.id}`;
+
+    // Recenter giống commitStroke để transform lưu trữ khớp hệ quy chiếu
+    this.recenterMesh(mesh);
+
+    // Áp transform đã lưu (nếu stroke từng được chỉnh sửa)
+    if (data.transform) {
+      mesh.position.fromArray(data.transform.position);
+      mesh.rotation.set(...data.transform.rotation);
+      mesh.scale.fromArray(data.transform.scale);
+    }
+
     this.scene.add(mesh);
     this.committedStrokes.push({ mesh, data });
   }

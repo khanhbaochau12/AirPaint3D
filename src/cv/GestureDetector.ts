@@ -10,7 +10,19 @@ export interface GestureEvent {
   thumbTip:   { x: number; y: number; z: number };
   handSize:   number;   // normalized 0–1, dùng cho depth estimation
   confidence: number;
+  /** 21 landmarks đầy đủ — vẽ skeleton overlay lên camera PiP. */
+  landmarks?: NormalizedLandmarkList;
 }
+
+/** Các cặp khớp nối của bàn tay theo chuẩn MediaPipe — vẽ skeleton. */
+export const HAND_CONNECTIONS: ReadonlyArray<[number, number]> = [
+  [0, 1], [1, 2], [2, 3], [3, 4],           // ngón cái
+  [0, 5], [5, 6], [6, 7], [7, 8],           // ngón trỏ
+  [5, 9], [9, 10], [10, 11], [11, 12],      // ngón giữa
+  [9, 13], [13, 14], [14, 15], [15, 16],    // ngón áp út
+  [13, 17], [17, 18], [18, 19], [19, 20],   // ngón út
+  [0, 17],                                   // cạnh lòng bàn tay
+];
 
 /**
  * GestureDetector
@@ -106,6 +118,7 @@ export class GestureDetector {
       thumbTip:   { x: lm[4].x, y: lm[4].y, z: lm[4].z  ?? 0 },
       handSize:   this.estimateHandSize(lm),
       confidence: results.multiHandedness?.[0]?.score ?? 1,
+      landmarks:  lm,
     };
 
     this.lastGesture = debounced;

@@ -149,7 +149,22 @@ Mỗi nét là một `TubeGeometry` dựng quanh **Catmull-Rom spline** (tension
 - Geometry cũ được `dispose()` ngay trước khi dựng lại → không rò rỉ GPU memory.
 - Material cache theo mã màu hex — 6 màu = tối đa 6 material, giảm draw call.
 
-### 3.6. Undo / Redo hai stack
+### 3.6. Chọn & biến đổi vật thể bằng tay (chế độ Chỉnh sửa)
+
+Raycast từ vị trí ngón trỏ (NDC) vào danh sách mesh (nét vẽ + hình khối):
+
+- **Hover** (POINT): mesh đầu tiên ray cắt được viền `BoxHelper` trắng.
+- **Grab** (PINCH edge): giữ `grabOffset = object.position − handWorldPos` để vật
+  không "nhảy" về tay khi bắt đầu kéo.
+- **Drag** theo công cụ: *Di chuyển* — `position = handWorldPos + grabOffset`
+  (đủ 3 trục, Z từ hand size); *Xoay* — delta màn hình dx/dy → `rotation.y/x`;
+  *Thu phóng* — kéo dọc nhân scale đều (chặn 0.05×–8×).
+
+Geometry nét vẽ được **recenter về tâm bounding box khi commit** để phép xoay và
+thu phóng quay quanh tâm nét thay vì gốc tọa độ world. Transform sau chỉnh sửa
+lưu vào `StrokeData.transform` / `ShapeData` — autosave giữ nguyên bố cục.
+
+### 3.7. Undo / Redo hai stack
 
 ```
 undo: committedStrokes.pop() → redoStack.push()   (giữ geometry, chỉ remove khỏi scene)
@@ -189,8 +204,11 @@ dùng đúng 4 icon cử chỉ (🤏 ☝ ✊ 🖐), mọi nút chức năng dùn
 | Bảng chỉ dẫn cử chỉ | Góc dưới-trái, luôn hiển thị | Nhắc 4 cử chỉ trong lúc vẽ |
 | Camera PiP (mirror) | Góc dưới-phải | Người dùng canh vị trí tay trong khung hình |
 | HUD trạng thái | Góc trên-trái | Cử chỉ hiện tại, chế độ, số nét vẽ |
-| Toolbar | Giữa-dưới | Màu, loại bút (thường/neon/trong mờ), cỡ brush, hoàn tác/làm lại, xóa, lưu PNG, xuất GLTF |
+| Toolbar | Giữa-dưới | Chế độ Vẽ/Chỉnh sửa, màu, loại bút (thường/neon/trong mờ), cỡ brush, thư viện, hoàn tác/làm lại, xóa, lưu PNG, xuất GLTF; tự thu gọn trên màn hình hẹp |
 | Con trỏ tay | Theo ngón trỏ | Vòng tròn bám vị trí ngón trỏ; trỏ vào nút + chụm để bấm — mọi nút công cụ thao tác được bằng cử chỉ, không cần chuột |
+| Thư viện hình khối | Panel phải | 6 primitive (hộp, cầu, trụ, nón, vòng xuyến, nút xoắn) — chụm để thả vào trước camera, tự chuyển sang chế độ chỉnh sửa |
+| Công cụ chỉnh sửa | Trên toolbar | Di chuyển / Xoay / Thu phóng vật thể (cả nét vẽ lẫn hình khối) bằng cách chụm-kéo; Xóa vật thể đang chọn |
+| Skeleton tay | Trên camera PiP | Vẽ 21 khớp + khung xương realtime — trực quan hóa tracking |
 | Nút "Chế độ AR" | Góc trên-phải | Chỉ hiện trên thiết bị hỗ trợ immersive-ar |
 
 Xử lý lỗi thân thiện: camera bị từ chối → thông báo hướng dẫn cấp quyền và nút

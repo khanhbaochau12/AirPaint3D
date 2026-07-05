@@ -67,6 +67,20 @@ cử chỉ luôn hiển thị ở góc dưới-trái khung vẽ. Chuột chỉ d
 nhìn (OrbitControls).
 
 **Loại bút:** Bút thường · Bút neon (phát sáng mạnh) · Bút trong mờ (bán trong suốt).
+Nét neon phát sáng thật nhờ **bloom postprocessing** (UnrealBloomPass); đầu bút
+bắn hạt lấp lánh khi vẽ.
+
+**Thư viện hình khối:** nút "Thư viện" mở panel 6 hình khối (hộp, cầu, trụ, nón,
+vòng xuyến, nút xoắn) — chụm vào tên hình là thả vào trước camera.
+
+**Chế độ Chỉnh sửa:** chuyển bằng nút "Chỉnh sửa" trên toolbar. Chỉ tay vào vật
+thể (nét vẽ hoặc hình khối) để chọn — viền sáng hiện quanh vật thể; chụm vào rồi
+kéo để thao tác theo công cụ đang chọn: **Di chuyển** (theo tay đủ 3 trục, xa gần
+theo khoảng cách tay) · **Xoay** (kéo ngang/dọc) · **Thu phóng** (kéo lên = to,
+kéo xuống = nhỏ). Nút "Xóa vật thể" xóa vật đang chọn. Mọi thay đổi đều autosave.
+
+Khung cảnh có sàn lưới + trường sao tạo chiều sâu; camera PiP hiển thị **skeleton
+21 khớp tay** đang được track; rảnh tay 15 giây thì scene tự xoay khoe tranh.
 
 ---
 

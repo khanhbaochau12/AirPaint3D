@@ -1,7 +1,17 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import { GestureDetector, GestureEvent, GestureType } from './cv/GestureDetector';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass';
+import {
+  GestureDetector, GestureEvent, GestureType, HAND_CONNECTIONS,
+} from './cv/GestureDetector';
 import { BrushType, StrokeEngine } from './render/StrokeEngine';
+import { Environment } from './render/Environment';
+import { SparkSystem } from './render/Sparks';
+import { ShapeManager, ShapeType } from './objects/ShapeManager';
+import { ObjectEditor, EditTool } from './edit/ObjectEditor';
 import { PositionMapper } from './ar/PositionMapper';
 import { initXR, isARSupported } from './ar/XRSession';
 import { MultiplayerSync } from './net/MultiplayerSync';
@@ -26,11 +36,36 @@ const CURSOR_SYNC_FPS = 30;
 const UI_SELECTOR       = '.ctrl-btn, .color-swatch, [data-brush]';
 const UI_CLICK_COOLDOWN = 600;   // ms — chặn double-click do jitter
 
+// Bloom — làm nét neon phát sáng thật
+const BLOOM_STRENGTH  = 0.85;
+const BLOOM_RADIUS    = 0.5;
+const BLOOM_THRESHOLD = 0.12;
+
+// Tự xoay khoe tranh khi rảnh tay
+const IDLE_ROTATE_MS    = 15000;
+const IDLE_ROTATE_SPEED = 0.6;
+
+// Khoảng cách thả hình khối trước camera
+const SPAWN_DISTANCE = 1.6;
+
+// Toolbar tự thu gọn dưới ngưỡng này
+const COLLAPSE_WIDTH = 700;
+
+type AppMode = 'draw' | 'edit';
+
 const GESTURE_LABELS: Record<GestureType, string> = {
   PINCH:  '🤏 Đang vẽ',
   POINT:  '☝ Di chuyển',
   FIST:   '✊ Dừng',
   SPREAD: '🖐 Xóa nét cuối',
+  NONE:   '— Không thấy tay',
+};
+
+const GESTURE_LABELS_EDIT: Record<GestureType, string> = {
+  PINCH:  '🤏 Đang kéo vật thể',
+  POINT:  '☝ Chọn vật thể',
+  FIST:   '✊ Thả',
+  SPREAD: '🖐 —',
   NONE:   '— Không thấy tay',
 };
 
@@ -44,16 +79,23 @@ class AirPaintApp {
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
   private controls!: OrbitControls;
+  private composer!: EffectComposer;
+  private clock = new THREE.Clock();
 
   // Core modules
   private strokeEngine!: StrokeEngine;
   private positionMapper!: PositionMapper;
   private gestureDetector?: GestureDetector;
+  private environment!: Environment;
+  private sparks!: SparkSystem;
+  private shapeManager!: ShapeManager;
+  private editor!: ObjectEditor;
 
   // Media
   private video?: HTMLVideoElement;
 
   // State
+  private appMode: AppMode = 'draw';
   private isDrawing = false;
   private currentColor = COLORS.SKY;
   private brushRadius  = 0.015;
@@ -61,6 +103,8 @@ class AirPaintApp {
   private lastGesture: GestureType = 'NONE';
   private autosaveTimer?: number;
   private lastCursorSync = 0;
+  private lastActivity = performance.now();
+  private prevNorm: { x: number; y: number } | null = null;
 
   // Hand cursor — bấm nút UI bằng cử chỉ
   private handCursorEl: HTMLElement | null = null;
@@ -80,6 +124,7 @@ class AirPaintApp {
     this.setupRenderer();
     this.setupScene();
     this.setupCamera();
+    this.setupComposer();
     this.setupLighting();
     this.setupUI();
     this.setupARButton();
@@ -90,10 +135,11 @@ class AirPaintApp {
     // getUserMedia + requestSession cần user gesture mới thân thiện.
     this.setupOnboarding();
 
-    // Hook kiểm thử: mô phỏng GestureEvent từ console khi có ?debug
+    // Hook kiểm thử: mô phỏng GestureEvent + soi trạng thái từ console khi có ?debug
     if (new URLSearchParams(location.search).has('debug')) {
-      (window as unknown as Record<string, unknown>).__gesture =
-        (e: GestureEvent) => this.handleGesture(e);
+      const w = window as unknown as Record<string, unknown>;
+      w.__gesture = (e: GestureEvent) => this.handleGesture(e);
+      w.__app = this;
     }
 
     this.startRenderLoop();
@@ -123,6 +169,7 @@ class AirPaintApp {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.composer?.setSize(window.innerWidth, window.innerHeight);
     });
   }
 
@@ -130,6 +177,10 @@ class AirPaintApp {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x050811);
     this.scene.fog = new THREE.Fog(0x050811, 8, 20);
+
+    this.environment = new Environment(this.scene);
+    this.sparks      = new SparkSystem(this.scene);
+    this.shapeManager = new ShapeManager(this.scene);
 
     this.strokeEngine = new StrokeEngine(this.scene, {
       color:       this.currentColor,
@@ -141,6 +192,19 @@ class AirPaintApp {
       this.scheduleAutosave();
       this.updateStrokeCount();
     };
+
+    // Editor chỉnh sửa vật thể: raycast trên strokes + shapes
+    this.editor = new ObjectEditor(
+      this.scene,
+      () => [...this.strokeEngine.meshes, ...this.shapeManager.meshes],
+      (obj) => {
+        // Đồng bộ transform vào data để autosave giữ được vị trí mới
+        if (!this.shapeManager.syncTransform(obj)) {
+          this.strokeEngine.syncTransform(obj);
+        }
+        this.scheduleAutosave();
+      }
+    );
   }
 
   private setupCamera(): void {
@@ -156,12 +220,27 @@ class AirPaintApp {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
     this.controls.enableZoom = true;
-    this.controls.autoRotate = false;
+    this.controls.autoRotateSpeed = IDLE_ROTATE_SPEED;
+    this.controls.addEventListener('start', () => { this.lastActivity = performance.now(); });
 
     this.positionMapper = new PositionMapper(this.camera, {
       depthRange:    [0.2, 2.0],
       handSizeRange: [0.06, 0.45],
     });
+  }
+
+  /** Bloom postprocessing — nét neon phát sáng thật. */
+  private setupComposer(): void {
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.composer.setSize(window.innerWidth, window.innerHeight);
+
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.composer.addPass(new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      BLOOM_STRENGTH, BLOOM_RADIUS, BLOOM_THRESHOLD
+    ));
+    this.composer.addPass(new OutputPass());
   }
 
   private setupLighting(): void {
@@ -242,7 +321,7 @@ class AirPaintApp {
       // canh vị trí tay (CSS .camera-pip mirror sẵn bằng scaleX(-1))
       const pip = document.getElementById('camera-pip');
       if (pip) {
-        pip.appendChild(this.video);
+        pip.insertBefore(this.video, pip.firstChild);
         pip.classList.remove('hidden');
       }
       return true;
@@ -264,23 +343,36 @@ class AirPaintApp {
 
   private handleGesture(event: GestureEvent): void {
     this.updateGestureStatus(event.gesture);
+    this.drawHandSkeleton(event.landmarks);
     const overUI = this.updateHandCursor(event);
 
     // Mất tracking — commit stroke dở dang, reset filter, ẩn cursor
     if (event.gesture === 'NONE') {
       this.stopDrawing();
+      this.editor.release();
       this.positionMapper.reset();
       if (this.cursorSphere) this.cursorSphere.visible = false;
       this.uiPinchActive = false;
+      this.prevNorm = null;
       this.lastGesture = 'NONE';
       return;
     }
+
+    this.lastActivity = performance.now();
 
     const worldPos = this.positionMapper.map(
       event.indexTip.x,
       event.indexTip.y,
       event.handSize
     );
+
+    // Tọa độ chuẩn hóa màn hình (đã flip gương) + delta so với frame trước
+    const nx = 1 - event.indexTip.x;
+    const ny = event.indexTip.y;
+    const dx = this.prevNorm ? nx - this.prevNorm.x : 0;
+    const dy = this.prevNorm ? ny - this.prevNorm.y : 0;
+    this.prevNorm = { x: nx, y: ny };
+    const ndc = new THREE.Vector2(nx * 2 - 1, -(ny * 2 - 1));
 
     this.syncCursor(worldPos);
 
@@ -296,11 +388,23 @@ class AirPaintApp {
           }
           this.uiPinchActive = true;
         }
-        // Pinch bắt đầu trên UI → không vẽ cho tới khi thả tay
+        // Pinch bắt đầu trên UI → không vẽ/kéo cho tới khi thả tay
         if (this.uiPinchActive) break;
+
+        if (this.appMode === 'edit') {
+          // Chụm vào vật thể = grab; giữ chụm = kéo theo công cụ hiện tại
+          if (pinchEdge) {
+            this.editor.tryGrab(ndc, this.camera, worldPos);
+          } else if (this.editor.isGrabbing) {
+            this.editor.drag(worldPos, dx, dy);
+          }
+          this.updateCursorIndicator(worldPos, this.editor.isGrabbing);
+          break;
+        }
 
         this.controls.enabled = false;  // Tắt orbit khi vẽ
         this.strokeEngine.addPoint(worldPos);
+        this.sparks.emit(worldPos, new THREE.Color(this.currentColor), 2);
         this.isDrawing = true;
         this.updateCursorIndicator(worldPos, true);
         break;
@@ -309,7 +413,10 @@ class AirPaintApp {
       case 'POINT':
         // Di chuyển cursor
         this.uiPinchActive = false;
-        if (this.isDrawing) {
+        if (this.appMode === 'edit') {
+          this.editor.release();
+          this.editor.updateHover(ndc, this.camera);
+        } else if (this.isDrawing) {
           this.stopDrawing();
           this.positionMapper.reset();  // Reset filter tránh lurch
         }
@@ -317,22 +424,79 @@ class AirPaintApp {
         break;
 
       case 'FIST':
-        // Dừng hẳn
+        // Dừng hẳn / thả vật thể
         this.uiPinchActive = false;
+        this.editor.release();
         this.stopDrawing();
         break;
 
       case 'SPREAD':
         // Edge-trigger: chỉ undo MỘT LẦN khi gesture chuyển sang SPREAD,
-        // nếu không giữ tay xòe 1 giây sẽ xóa sạch ~30 strokes
+        // nếu không giữ tay xòe 1 giây sẽ xóa sạch ~30 strokes.
+        // Chế độ chỉnh sửa: SPREAD không xóa gì (tránh xóa nhầm vật thể).
         this.uiPinchActive = false;
-        if (this.lastGesture !== 'SPREAD') {
+        this.editor.release();
+        if (this.appMode === 'draw' && this.lastGesture !== 'SPREAD') {
           this.undo();
         }
         break;
     }
 
     this.lastGesture = event.gesture;
+  }
+
+  private stopDrawing(): void {
+    if (!this.isDrawing) return;
+    this.strokeEngine.commitStroke();
+    this.isDrawing = false;
+    this.controls.enabled = true;
+  }
+
+  private updateGestureStatus(gesture: GestureType): void {
+    const el = document.getElementById('gesture-status');
+    if (!el) return;
+    el.textContent = this.appMode === 'edit'
+      ? GESTURE_LABELS_EDIT[gesture]
+      : GESTURE_LABELS[gesture];
+  }
+
+  // ────────────────────────────────────────────────────────
+  // HAND SKELETON — vẽ 21 khớp tay lên camera PiP
+  // ────────────────────────────────────────────────────────
+
+  private drawHandSkeleton(landmarks?: GestureEvent['landmarks']): void {
+    const canvas = document.getElementById('pip-skeleton') as HTMLCanvasElement | null;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    ctx.clearRect(0, 0, w, h);
+    if (!landmarks) return;
+
+    // Mirror X — khớp với video PiP đang scaleX(-1)
+    const px = (i: number) => ((1 - landmarks[i].x) * w);
+    const py = (i: number) => (landmarks[i].y * h);
+
+    ctx.strokeStyle = 'rgba(99, 179, 237, 0.9)';
+    ctx.lineWidth = 2;
+    for (const [a, b] of HAND_CONNECTIONS) {
+      ctx.beginPath();
+      ctx.moveTo(px(a), py(a));
+      ctx.lineTo(px(b), py(b));
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < landmarks.length; i++) {
+      ctx.beginPath();
+      ctx.arc(px(i), py(i), 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // ────────────────────────────────────────────────────────
@@ -373,25 +537,13 @@ class AirPaintApp {
     this.hoveredEl = el;
   }
 
-  private stopDrawing(): void {
-    if (!this.isDrawing) return;
-    this.strokeEngine.commitStroke();
-    this.isDrawing = false;
-    this.controls.enabled = true;
-  }
-
-  private updateGestureStatus(gesture: GestureType): void {
-    const el = document.getElementById('gesture-status');
-    if (el) el.textContent = GESTURE_LABELS[gesture];
-  }
-
   // ────────────────────────────────────────────────────────
   // CURSOR INDICATOR (3D sphere theo ngón tay)
   // ────────────────────────────────────────────────────────
 
   private cursorSphere?: THREE.Mesh;
 
-  private updateCursorIndicator(pos: THREE.Vector3, isDrawing: boolean): void {
+  private updateCursorIndicator(pos: THREE.Vector3, isActive: boolean): void {
     if (!this.cursorSphere) {
       const geo = new THREE.SphereGeometry(0.025, 16, 16);
       const mat = new THREE.MeshBasicMaterial({
@@ -407,8 +559,59 @@ class AirPaintApp {
     this.cursorSphere.visible = true;
     this.cursorSphere.position.copy(pos);
     (this.cursorSphere.material as THREE.MeshBasicMaterial).color.set(
-      isDrawing ? this.currentColor : 0xffffff
+      isActive ? this.currentColor : 0xffffff
     );
+  }
+
+  // ────────────────────────────────────────────────────────
+  // MODE + SHAPE LIBRARY + EDIT TOOLS
+  // ────────────────────────────────────────────────────────
+
+  private setMode(mode: AppMode): void {
+    this.appMode = mode;
+    document.querySelectorAll<HTMLElement>('[data-mode]').forEach(b => {
+      b.classList.toggle('active', b.dataset.mode === mode);
+    });
+    document.getElementById('edit-tools')?.classList.toggle('hidden', mode !== 'edit');
+
+    if (mode === 'draw') {
+      this.editor.reset();
+    } else {
+      this.stopDrawing();
+    }
+  }
+
+  private setTool(tool: EditTool): void {
+    this.editor.tool = tool;
+    document.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => {
+      b.classList.toggle('active', b.dataset.tool === tool);
+    });
+  }
+
+  /** Thả hình khối từ thư viện vào trước camera, tự chuyển sang chế độ chỉnh sửa. */
+  private spawnShape(type: ShapeType): void {
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    const pos = this.camera.position.clone().add(dir.multiplyScalar(SPAWN_DISTANCE));
+    pos.x += (Math.random() - 0.5) * 0.3;
+    pos.y += (Math.random() - 0.5) * 0.2;
+
+    const mesh = this.shapeManager.add(type, this.currentColor, pos);
+    this.setMode('edit');
+    this.editor.select(mesh);   // chọn sẵn — chụm là kéo được ngay
+    this.scheduleAutosave();
+    this.updateStrokeCount();
+  }
+
+  private deleteSelectedObject(): void {
+    const obj = this.editor.takeSelected();
+    if (!obj) return;
+
+    if (!this.shapeManager.remove(obj)) {
+      this.strokeEngine.removeByMesh(obj);
+    }
+    this.scheduleAutosave();
+    this.updateStrokeCount();
   }
 
   // ────────────────────────────────────────────────────────
@@ -493,6 +696,8 @@ class AirPaintApp {
 
   // ────────────────────────────────────────────────────────
   // PERSISTENCE — autosave localStorage
+  // Format v2: { version: 2, strokes: [...], shapes: [...] }
+  // (v1 là mảng strokes thuần — vẫn đọc được)
   // ────────────────────────────────────────────────────────
 
   private scheduleAutosave(): void {
@@ -502,7 +707,11 @@ class AirPaintApp {
 
   private saveToStorage(): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.strokeEngine.exportData()));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        version: 2,
+        strokes: this.strokeEngine.exportData(),
+        shapes:  this.shapeManager.serialize(),
+      }));
     } catch (err) {
       console.warn('[AirPaint] Không thể autosave:', err);
     }
@@ -512,11 +721,20 @@ class AirPaintApp {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
-      const strokes = JSON.parse(raw);
-      if (Array.isArray(strokes) && strokes.length > 0) {
-        this.strokeEngine.loadData(strokes);
-        this.updateStrokeCount();
-        console.log(`[AirPaint] Khôi phục ${strokes.length} strokes từ phiên trước`);
+      const parsed = JSON.parse(raw);
+
+      if (Array.isArray(parsed)) {
+        // Format v1 — mảng strokes thuần
+        this.strokeEngine.loadData(parsed);
+      } else if (parsed?.version === 2) {
+        this.strokeEngine.loadData(parsed.strokes ?? []);
+        this.shapeManager.load(parsed.shapes ?? []);
+      }
+
+      this.updateStrokeCount();
+      const total = this.strokeEngine.strokeCount + this.shapeManager.count;
+      if (total > 0) {
+        console.log(`[AirPaint] Khôi phục ${total} vật thể từ phiên trước`);
       }
     } catch (err) {
       console.warn('[AirPaint] Không thể khôi phục tranh đã lưu:', err);
@@ -529,7 +747,7 @@ class AirPaintApp {
 
   private saveSnapshot(): void {
     // Render lại ngay trước khi đọc buffer (không cần preserveDrawingBuffer)
-    this.renderer.render(this.scene, this.camera);
+    this.composer.render();
     const url = this.renderer.domElement.toDataURL('image/png');
     const a = document.createElement('a');
     a.href = url;
@@ -557,6 +775,8 @@ class AirPaintApp {
 
   private clearAll(): void {
     this.strokeEngine.clear();
+    this.shapeManager.clear();
+    this.editor.reset();
     this.multiplayer?.broadcastClear();
     this.scheduleAutosave();
     this.updateStrokeCount();
@@ -564,7 +784,9 @@ class AirPaintApp {
 
   private updateStrokeCount(): void {
     const el = document.getElementById('stroke-count');
-    if (el) el.textContent = String(this.strokeEngine.strokeCount);
+    if (el) {
+      el.textContent = String(this.strokeEngine.strokeCount + this.shapeManager.count);
+    }
   }
 
   // ────────────────────────────────────────────────────────
@@ -592,6 +814,28 @@ class AirPaintApp {
       });
     });
 
+    // Mode: Vẽ / Chỉnh sửa
+    document.querySelectorAll<HTMLElement>('[data-mode]').forEach(el => {
+      el.addEventListener('click', () => this.setMode(el.dataset.mode as AppMode));
+    });
+
+    // Edit tools: Di chuyển / Xoay / Thu phóng
+    document.querySelectorAll<HTMLElement>('[data-tool]').forEach(el => {
+      el.addEventListener('click', () => this.setTool(el.dataset.tool as EditTool));
+    });
+
+    // Thư viện hình khối
+    document.getElementById('btn-library')?.addEventListener('click', () => {
+      document.getElementById('shape-library')?.classList.toggle('hidden');
+    });
+    document.querySelectorAll<HTMLElement>('[data-shape]').forEach(el => {
+      el.addEventListener('click', () => this.spawnShape(el.dataset.shape as ShapeType));
+    });
+
+    document.getElementById('btn-delete-object')?.addEventListener('click', () => {
+      this.deleteSelectedObject();
+    });
+
     document.getElementById('btn-undo')?.addEventListener('click', () => this.undo());
     document.getElementById('btn-redo')?.addEventListener('click', () => this.redo());
     document.getElementById('btn-clear')?.addEventListener('click', () => this.clearAll());
@@ -607,6 +851,18 @@ class AirPaintApp {
       this.brushRadius = val / 1000;   // slider 1–50 → 0.001–0.05
       this.strokeEngine.setOptions({ brushRadius: this.brushRadius });
     });
+
+    // Toolbar thu gọn — mặc định gọn trên màn hình hẹp
+    const toolbar = document.getElementById('toolbar');
+    document.getElementById('btn-toolbar-toggle')?.addEventListener('click', () => {
+      toolbar?.classList.toggle('collapsed');
+    });
+    if (window.innerWidth < COLLAPSE_WIDTH) {
+      toolbar?.classList.add('collapsed');
+    }
+
+    // Mọi tương tác chuột cũng tính là hoạt động (tắt auto-rotate)
+    window.addEventListener('pointerdown', () => { this.lastActivity = performance.now(); });
 
     // Keyboard shortcuts
     window.addEventListener('keydown', (e) => {
@@ -629,13 +885,28 @@ class AirPaintApp {
 
   private startRenderLoop(): void {
     this.renderer.setAnimationLoop(() => {
+      const delta = this.clock.getDelta();
+
       // Gesture detection — GestureDetector tự skip frame nếu đang bận
       if (this.video && this.gestureDetector) {
         void this.gestureDetector.detect(this.video);
       }
 
+      this.sparks.update(delta);
+      this.environment.update(delta);
+
+      // Tự xoay khoe tranh khi rảnh tay
+      this.controls.autoRotate =
+        performance.now() - this.lastActivity > IDLE_ROTATE_MS &&
+        !this.isDrawing && !this.editor.isGrabbing;
       this.controls.update();
-      this.renderer.render(this.scene, this.camera);
+
+      // Composer không hỗ trợ WebXR — trong AR render trực tiếp
+      if (this.renderer.xr.isPresenting) {
+        this.renderer.render(this.scene, this.camera);
+      } else {
+        this.composer.render();
+      }
     });
   }
 }
