@@ -1,7 +1,7 @@
 {
   "name": "air-paint-3d",
   "version": "1.0.0",
-  "description": "3D Gesture AR Drawing — Đồ án tốt nghiệp",
+  "description": "3D Gesture AR Drawing — vẽ tranh 3D trong không khí bằng cử chỉ tay",
   "type": "module",
   "scripts": {
     "dev": "vite",

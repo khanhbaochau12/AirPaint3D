@@ -166,4 +166,4 @@ vẫn giữ nguyên các strokes.
 
 ## Tác giả
 
-Đồ án tốt nghiệp · 2024
+Dự án cá nhân — làm cho vui · 2024
